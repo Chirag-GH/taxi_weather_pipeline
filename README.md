@@ -9,7 +9,7 @@ This pipeline implements several data engineering patterns to ensure reliability
 - **Rolling Window Ingestion:** Scans the Volume for the latest available TLC month, downloads the next month when published, and removes the oldest local month to maintain the working data window.
 - **Dual Gold Layer Modeling:** Materializes a trip-level fact table (`gold_facts`) and a denormalized BI-serving table (`gold_obt_trips`) that reduces the number of joins required in the reporting layer.
 - **Data Quality Gates & Join Optimization:** DQ checks use anti-joins for referential-integrity validation; small dimension/reference tables are broadcast during Silver/Gold transformations.
-- **Explicit Silver Quarantine Pattern:** Utilizes PySpark's `when().otherwise()` logic to evaluate business rules, routing valid records to `silver_trips` while explicitly isolating invalid records (e.g., negative fares, impossible dates) into `silver_quarantine_trips` to preserve rejected records and rejection reasons for the processed window.
+- **Explicit Silver Quarantine Pattern:** Utilizes PySpark's `when().otherwise()` logic to evaluate business rules, routing valid records to `silver_trips` while explicitly isolating invalid records (e.g., negative fares, impossible dates, zero passengers) into `silver_quarantine_trips` to preserve rejected records and rejection reasons for the processed window.
 
 ## Architecture
 
@@ -190,21 +190,17 @@ The Data Quality Validation task executes the configured SQL checks and raises a
 
 The Databricks Job configuration is maintained in the Databricks workspace and is not exported to this repository.
 
-
-
-
 ## Data Transformation Details
 
 The pipeline applies several key transformations to prepare the Silver and Gold datasets:
 
 - **Weather Transformation:** Casts weather `timestamps` to `timestamp_ntz` and shifts precipitation and snowfall values to the subsequent hourly record within each region using a window function.
 
-- **Missing Value Handling:** Fills null (`passenger_count, Airport_fee, congestion_surcharge`) values with 0; maps missing store_and_fwd_flag to `Unknown`; and maps missing `RatecodeID` to 99. Zone reference values of `N/A` are normalized to `Unknown`.
-
+- **Missing Value Handling:** Fills null (`Airport_fee, congestion_surcharge`) values with 0; maps missing store_and_fwd_flag to `Unknown`; and maps missing `RatecodeID` to 99. Zone reference values of `N/A` are normalized to `Unknown`.
    
 - **Date Truncation:** Derives `pickup_datehour` and `dropoff_datehour` by truncating precise timestamps to the hour for accurate joining with hourly weather metrics.
     
-Business Rule Quarantining: Routes trips to quarantine when pickup timestamps fall outside the active window, pickup time is greater than or equal to drop-off time, trip distance or fare is non-positive, or `extra` is negative.
+Business Rule Quarantining: Routes trips to quarantine when pickup timestamps fall outside the active window, pickup time is greater than or equal to drop-off time, trip distance or fare is non-positive, passenger count is zero or null, or `extra` is negative.
     
 
 ## Pipeline Limitations & Design Choices

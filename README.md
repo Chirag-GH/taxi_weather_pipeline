@@ -193,16 +193,20 @@ The Gold layer datasets connect to Microsoft Power BI to explore relationships b
 
 ### Dashboards & Key Visuals
 
-_High-level executive summary displaying total trips, revenue metrics, and baseline operational health._
-![Executive Overview](docs/images/Executive Overview.png)
+High-level executive summary displaying total trips, revenue metrics, and baseline operational health.
+![Executive Overview](docs/images/Executive_Overview.png)
 
-_Assessing trip volume fluctuations and demand shifts during varied precipitation, snowfall, and temperature conditions._
+Assessing trip volume fluctuations and demand shifts during varied precipitation, snowfall, and temperature conditions.
+![Ride Count by Weather and Borough](docs/images/Ride_Count_by_Weather_and_Borough.png)
 
-_Analyzing geographic profitability, isolating which inter-borough routes generate the highest revenue per mile._
+Analyzing geographic profitability, isolating which inter-borough routes generate the highest revenue per mile.
+![Revenue Per Mile by Route](docs/images/Revenue_Per_Mile_by_Route.png)
 
-_Exploring how factors like trip distance, weather conditions, and payment types influence average tipping percentages._
+Exploring how factors like trip distance, weather conditions, and payment types influence average tipping percentages.
+![Driver Tipping & Friction](docs/images/Driver_Tipping&Friction.png)
 
-_Geographic breakdown of total volume and average fare amounts originating from each NYC borough._
+Geographic breakdown of total volume and average fare amounts originating from each NYC borough.
+![Ride Count and Average Fares by Borough](docs/images/Ride_Count_and_Average_Fares_by_Borough.png)
 
 ## Data Quality / Validation
 

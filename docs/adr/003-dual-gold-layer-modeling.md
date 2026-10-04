@@ -3,10 +3,10 @@
 ## Status: Accepted
 
 ## Context
-The Gold layer's primary requirement is to serve data to Power BI dashboards. While a normalized Kimball Star Schema is highly efficient for cloud storage, it forces BI engines to perform multi-table joins on the fly, which can degrade dashboard load performance. Conversely, a One Big Table (OBT) is structurally optimized for BI filtering speed but incurs storage redundancy.
+The Gold layer's primary requirement is to serve data to Power BI dashboards. While a normalized schema is highly efficient for cloud storage, it forces BI engines to perform multi-table joins on the fly, which can degrade dashboard load performance. Conversely, a One Big Table (OBT) is structurally optimized for BI filtering speed but incurs storage redundancy.
 
 ## Decision
-The pipeline materializes both a Kimball Star Schema (`gold_facts` referencing Silver dimensions) and a fully denormalized One Big Table (`gold_obt_trips`).
+Materializes both a normalized Schema (`gold_facts`) and a fully denormalized One Big Table (`gold_obt_trips`).
 
 ## Consequences
 * **Positive:** Power BI connects directly to `gold_obt_trips`, ensuring low-latency slicing and dicing without real-time join execution.

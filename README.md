@@ -27,7 +27,7 @@ graph TD
 
     subgraph Landing / Staging Storage
         PARQ[yellow_tripdata_YYYY-MM.parquet * 3]
-        JSON_COORD[borough_coords.json]
+        JSON_COORD[borough_coord.json]
         ZCSV[taxi_zone_lookup.csv]
         JSON_DATES[pipeline_dates.json]
     end
@@ -179,8 +179,10 @@ Data Quality Validation
       │
       ▼
 Gold Layer Build
-      │
-      ▼
+
+Gold Layer
+    │
+    ▼
 Power BI
 ```
 
@@ -194,7 +196,7 @@ The Databricks Job configuration is maintained in the Databricks workspace and i
 
 The pipeline applies several key transformations to prepare the Silver and Gold datasets:
 
-- **Weather Transformation:** Casts weather `timestamps` to `timestamp_ntz` and shifts precipitation and snowfall values to the subsequent hourly record within each region using a window function.
+- **Weather Transformation:** Casts weather `timestamps` to `timestamp_ntz` and uses a window function to shift precipitation and snowfall values to the subsequent hourly record within each region.
 
 - **Missing Value Handling:** Fills null (`Airport_fee, congestion_surcharge`) values with 0; maps missing store_and_fwd_flag to `Unknown`; and maps missing `RatecodeID` to 99. Zone reference values of `N/A` are normalized to `Unknown`.
    
@@ -215,9 +217,9 @@ The following design decisions constraint the scope and operation of the pipelin
 
 The Gold layer datasets connect to Microsoft Power BI to explore relationships between weather events, geographic locations, and taxi demand.
 
-Note: Dashboard metrics exclude the top and bottom 1% of trip-duration values to reduce the influence of extreme duration and distance anomalies.
-
 ### Dashboards & Key Visuals
+
+Dashboard Note: Dashboard metrics exclude the top and bottom 1% of trip-duration values to reduce the influence of extreme trip-duration outliers.
 
 The visuals below highlight key dashboard components and do not reflect every analytical output in the full project.
 
@@ -240,7 +242,7 @@ Geographic breakdown of total volume and average fare amounts originating from e
 
 The pipeline implements a validation framework in `03_run_dqcs.ipynb` that acts as a circuit breaker before Gold materialization. Validation checks include:
 
-- **Null Checks:** Validates absence of nulls in `VendorID`, `RatecodeID`, `payment_type`, and geographic `LocationID`s.
+- **Null Checks:** Validates required trip fields, location IDs, and weather timestamps are not null.
     
 - **Referential Integrity:** Validates that configured trip and weather reference fields map to their corresponding Silver reference tables.
     
@@ -278,7 +280,7 @@ The pipeline is designed to run in a Databricks environment and uses a Unity Cat
 
    `/Volumes/workspace/taxi_weather/datasets/`
 
-3. Copy the initial TLC and taxi-zone files from `intial_datasets/` into the Volume.
+3. Copy the initial TLC and taxi-zone files from `intial_datasets/` into the Volume.The included initial dataset contains three TLC monthly files; the rolling-ingestion notebook expects the existing trip files to follow the yellow_tripdata_YYYY-MM.parquet naming convention.
 
 4. Ensure the `workspace.taxi_weather` catalog/schema is available for the Delta tables created by the pipeline.
 

@@ -25,7 +25,7 @@ graph TD
         STATIC[Taxi Zone Lookup CSV]
     end
 
-    subgraph Databricks Volume Storage
+    subgraph Landing / Staging Storage
         PARQ[yellow_tripdata_YYYY-MM.parquet * 3]
         JSON_COORD[borough_coords.json]
         ZCSV[taxi_zone_lookup.csv]
@@ -48,11 +48,8 @@ graph TD
         SQ[silver_quarantine_trips]
         SW[silver_weather]
         SZ[silver_zone]
-        SDIMWC[silver_wc_dim]
-        SDIMB[silver_borough_dim]
-        SDIMP[silver_payment_dim]
-        SDIMV[silver_vendor_dim]
-        SDIMR[silver_rate_dim]
+        SDIM[(Silver Dimensional Tables)]
+        
     end
 
     subgraph Gold Layer
@@ -83,10 +80,10 @@ graph TD
     D -->|Invalid Date / Fare| SQ
     
     BW --> SW
-    SDIMB --> SW
-    SDIMWC --> SW
+    SDIM -->|Borough Name| SW
+    SDIM -->|Weather Codes| SW
     BZ --> SZ
-    SDIMB --> SZ
+    SDIM -->|Borough Name| SZ
 
     %% Gold Flow
     ST --> GF
@@ -94,11 +91,11 @@ graph TD
     SZ --> GF
 
     GF --> GOBT
-    SDIMB --> GOBT
-    SDIMV --> GOBT
-    SDIMR --> GOBT
-    SDIMP --> GOBT
-    SDIMWC --> GOBT
+    SDIM -->|Borough Name| GOBT
+    SDIM -->|Vendor ID| GOBT
+    SDIM -->|RateCode ID| GOBT
+    SDIM -->|Payment Type| GOBT
+    SDIM -->|Weather Codes| GOBT
 
     GOBT --> PBI
 ```

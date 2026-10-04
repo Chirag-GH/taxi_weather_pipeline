@@ -7,15 +7,14 @@ An end-to-end data pipeline built on Databricks that processes NYC TLC taxi trip
 This pipeline implements several data engineering patterns to ensure reliability, performance, and analytical flexibility:
 
 - **Rolling Window Ingestion:** Scans the Volume for the latest available TLC month, downloads the next month when published, and removes the oldest local month to maintain the working data window.
-- **Dual Gold Layer Modeling:** Materializes both a normalized Schema (`gold_facts`) and a  denormalized BI-serving table (`gold_obt_trips`) that reduces the number of joins required in the reporting layer.
-- **Optimized Data Quality Gates:** DQ checks use anti-joins for referential-integrity validation; small dimension/reference tables are broadcast during Silver/Gold transformations.
+- **Dual Gold Layer Modeling:** Materializes a trip-level fact table (`gold_facts`) and a denormalized BI-serving table (`gold_obt_trips`) that reduces the number of joins required in the reporting layer.
+- **Data Quality Gates & Join Optimization:** DQ checks use anti-joins for referential-integrity validation; small dimension/reference tables are broadcast during Silver/Gold transformations.
 - **Explicit Silver Quarantine Pattern:** Utilizes PySpark's `when().otherwise()` logic to evaluate business rules, routing valid records to `silver_trips` while explicitly isolating invalid records (e.g., negative fares, impossible dates) into `silver_quarantine_trips` to preserve rejected records and rejection reasons for the processed window.
 
 ## Architecture
 
 The pipeline processes data from raw sources to business-ready tables using a layered Databricks Medallion architecture. 
 ### Platform Architecture
-
 
 
 ```mermaid
@@ -25,6 +24,8 @@ graph TD
         OM[Open-Meteo Historical API]
         GEO[Open-Meteo Geocoding API]
         ZCSV[Taxi Zone Lookup CSV]
+        JSON_COORD[borough_coords.json]
+        
     end
 
     subgraph Bronze Layer
@@ -49,7 +50,8 @@ graph TD
     subgraph BI
         PBI[Microsoft Power BI]
     end
-
+    GEO --> JSON_COORD
+    JSON_COORD --> OM
     TLC --> BT
     OM --> BW
     GEO --> BW
@@ -140,7 +142,7 @@ The project integrates three primary data domains:
 | ---------------------------------- | -------------- | ------------------- | -------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
 | **NYC TLC Yellow Taxi Trip Datas** | NYC TLC        | `.parquet` (Volume) | `tpep_pickup_datetime`, `PULocationID`, `DOLocationID`, `fare_amount`, `trip_distance` | Core fact data representing individual taxi rides.                                       |
 | **NYC TLC Taxi Zone Lookup**       | NYC TLC        | `.csv` (Volume)     | `LocationID`, `Borough`, `Zone`, `service_zone`                                        | Spatial lookup to map Location IDs to Boroughs and Zones.                                |
-| **Borough Coordinates**             | Open-Meteo Geocoding API | .json (Volume)         | `latitude`, `longitude`| Provides precise geographic coordinates for the 6 NYC administrative regions to feed the Historical Weather API. |
+| **Borough Coordinates**             | Open-Meteo Geocoding API | .json (Volume)         | `latitude`, `longitude`| Provides representative geographic coordinates for five NYC boroughs plus EWR, used to query the Historical Weather API. |
 | **Historical Weather**             | Open-Meteo API | JSON / REST         | `temperature_2m`, `precipitation`, `snowfall`, `weather_code`                          | Hourly weather for five NYC boroughs plus EWR, represented by one coordinate per region. |
 
 ## Dataset Grain
@@ -151,9 +153,9 @@ Understanding the granularity of the tables is critical for downstream BI joinin
 | Dataset | Grain |
 | :--- | :--- |
 | **silver_trips** | One valid TLC taxi trip. |
-| **silver_weather** | One NYC borough per hour. |
+| **silver_weather** | OOne geographic region per hour (five NYC boroughs + EWR). |
 | **silver_zone** | One NYC TLC Taxi Zone (LocationID). |
-| **gold_facts** | One valid taxi trip enriched with pickup-borough hourly weather. |
+| **gold_facts** | One valid taxi trip enriched with pickup-region hourly weather. |
 | **gold_obt_trips** | One fully denormalized valid taxi trip. |
 
 
@@ -180,45 +182,52 @@ The pipeline is orchestrated via sequential PySpark notebooks across the Medalli
     
 	- Executes 18 automated SQL-based data quality checks (e.g., duplicate IDs, null datetimes, unknown reference IDs).
         
-    - Halts pipeline execution (`RuntimeError`) if any invalid rows bypass the Silver transformations.
+    - Halts execution with `RuntimeError` if any configured DQ check returns invalid records in the Silver datasets.
         
 3. **Gold Layer Build (`03_Gold`)**:
     
     - Builds the `gold_facts` table by joining trips with geographic and historical weather data at the `pickup_datehour` and `borough_id` granularity.
         
-    - Generates the denormalized `gold_obt_trips` view, fully resolving all string descriptions for immediate BI consumption.
+    - Generates the denormalized `gold_obt_trips` Delta table, resolving coded attributes and geographic descriptions for BI consumption.
         
+**Databricks Jobs:** The notebooks are configured as a sequential Databricks workflow in the workspace; the Job configuration is not exported to this repository.
+
 
 _Databricks automated workflow execution orchestrating the Bronze, Silver, and Gold tasks._
+![Databricks workflow](docs/images/databricks_job_pipeline.png)
 
 
 ## Data Transformation Details
 
 The pipeline handles Several key transformations to ensure data integrity:
 
-- **Timezone Alignment:** Weather data timestamps are adjusted by `- 1 HOUR` (`interval 1 hour`) to correctly align with localized taxi pickup hours.
+- **Weather Transformation:** Casts weather `timestamps` to `timestamp_ntz` and shifts precipitation and snowfall values to the subsequent hourly record within each region using a window function.
 
-- **Missing Value Imputation:** Fills nulls with `0` for nullable fields (`passenger_count`, `Airport_fee`, `congestion_surcharge, store_and_fwd_flag`) , normalize (`Unknown, N/A`) as `Unknown`for categorical flags (`Borough, Zone, service_zone`)  and other fields are handled differently. `RatecodeID` becomes `99.
-    
+- **Missing Value Handling:** Fills null (`passenger_count, Airport_fee, congestion_surcharge`) values with 0; maps missing store_and_fwd_flag to `Unknown`; and maps missing `RatecodeID` to 99. Zone reference values of `N/A` are normalized to `Unknown`.
+
+   
 - **Date Truncation:** Derives `pickup_datehour` and `dropoff_datehour` by truncating precise timestamps to the hour for accurate joining with hourly weather metrics.
     
-- **Business Rule Quarantining:** Explicitly tags records where drop-off precedes pick-up, trip distances are `<= 0`, fares are `<= 0`, or pickup dates outside the active pipeline window.
+Business Rule Quarantining: Routes trips to quarantine when pickup timestamps fall outside the active window, pickup time is greater than or equal to drop-off time, trip distance or fare is non-positive, or `extra` is negative.
     
 
 ## Pipeline Limitations & Design Choices
 
 The following design decisions constraint the scope and operation of the pipeline:
 - **Batch Overwrite Pattern:** Bronze trips, Bronze weather, Silver tables, Quarantine, and Gold tables are strictly written using overwrite mode. While file ingestion represents net-new monthly data, downstream tables are rebuilt entirely for the active window. This is a batch-oriented pipeline, not a streaming or incrementally updated architecture.
-- **3-Month Rolling Window:** The project enforces a 3-month rolling batch window to bound compute and storage footprints.
-- **Spatial Granularity:** Weather is represented using exactly one coordinate pair per NYC borough (5 total regions).
+- **3-Month Rolling Window:** The pipeline is designed to maintain a three-month working window, adding the next available month and removing the oldest month when new data is published.
+- **Spatial Granularity:** Weather is represented using one coordinate pair per geographic region: five NYC boroughs plus EWR (6 regions).
 - **Temporal Granularity:** Weather conditions are joined at the pickup_borough_id and truncated pickup_datehour level. There is no exact coordinate-level or minute-level weather matching due to disparities in the source datasets.
-
 
 ## Taxi + Weather Analysis & Insights
 
 The Gold layer datasets connect to Microsoft Power BI to explore relationships between weather events, geographic locations, and taxi demand.
 
+Note: Dashboard metrics exclude the top and bottom 1% of trip-duration values to reduce the influence of extreme duration and distance anomalies.
+
 ### Dashboards & Key Visuals
+
+The visuals below highlight key dashboard components and do not reflect every analytical output in the full project.
 
 High-level executive summary displaying total trips, revenue metrics, and baseline operational health.
 ![Executive Overview](docs/images/Executive_Overview.png)
@@ -241,7 +250,7 @@ The pipeline implements an validation framework in `03_run_dqcs.ipynb` that acts
 
 - **Null Checks:** Validates absence of nulls in `VendorID`, `RatecodeID`, `payment_type`, and geographic `LocationID`s.
     
-- **Referential Integrity:** Confirms all foreign keys in the trips and weather tables map successfully to the established Silver dimensions.
+- **Referential Integrity:** Validates that configured trip and weather reference fields map to their corresponding Silver reference tables.
     
 - **Logical Consistency:** Flags rows where `tpep_dropoff_datetime` < `tpep_pickup_datetime`.
     

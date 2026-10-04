@@ -137,20 +137,20 @@ The pipeline is orchestrated via sequential PySpark notebooks across the Medalli
 	    
 	- Retrieves hourly weather data covering the pipeline's calculated trip-data date window, including an additional month after the latest trip month to account for trailing drop-offs. Weather is represented at a geographic-region level rather than at the individual taxi pickup location.
 
-1. **Silver Transformations (`02_Silver`)**:
+2. **Silver Transformations (`02_Silver`)**:
 	- Materializes hardcoded dimension tables (Weather Codes, Borough IDs, Payment Types, Vendor IDs, Rate Codes).
 	    
 	- Cleanses `bronze_zone` using `silver_borough_dim`, and cleanses `bronze_weather` using both `silver_borough_dim` and `silver_wc_dim`, broadcasting smaller dimension tables during joins to optimize Spark performance.
 	    
 	- Evaluates trip data against business rules and routes records to `silver_trips` (valid) or `silver_quarantine_trips` (invalid).
 	
-2. **Data Quality Validation (`02_Silver/03_run_dqcs.ipynb`)**:
+3. **Data Quality Validation (`02_Silver/03_run_dqcs.ipynb`)**:
     
-	- Executes 18 automated SQL-based data quality checks (e.g., duplicate IDs, null datetimes, unknown reference IDs).
+	- Executes 18 automated SQL-based data quality checks (e.g., duplicate reference records, null datetimes, unknown reference IDs).
         
     - Halts execution with `RuntimeError` if any configured DQ check returns invalid records in the Silver datasets.
         
-3. **Gold Layer Build (`03_Gold`)**:
+4. **Gold Layer Build (`03_Gold`)**:
     
     - Builds the `gold_facts` table by joining trips with geographic and historical weather data at the `pickup_datehour` and `borough_id` granularity.
         

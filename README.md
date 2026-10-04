@@ -54,7 +54,6 @@ graph TD
     JSON_COORD --> OM
     TLC --> BT
     OM --> BW
-    GEO --> BW
     ZCSV --> BZ
 
     BT --> ST
@@ -153,7 +152,7 @@ Understanding the granularity of the tables is critical for downstream BI joinin
 | Dataset | Grain |
 | :--- | :--- |
 | **silver_trips** | One valid TLC taxi trip. |
-| **silver_weather** | OOne geographic region per hour (five NYC boroughs + EWR). |
+| **silver_weather** | One geographic region per hour (five NYC boroughs + EWR). |
 | **silver_zone** | One NYC TLC Taxi Zone (LocationID). |
 | **gold_facts** | One valid taxi trip enriched with pickup-region hourly weather. |
 | **gold_obt_trips** | One fully denormalized valid taxi trip. |
@@ -169,7 +168,7 @@ The pipeline is orchestrated via sequential PySpark notebooks across the Medalli
 	    
 	- Fetches spatial coordinates for five NYC boroughs (Queens, Bronx, Manhattan, Staten Island, Brooklyn) plus EWR via Open-Meteo's Geocoding API.
 	    
-	- Retrieves hourly weather data covering the pipeline's calculated trip-data date window, including an additional month after the latest trip month to account for trailing drop-offs. Weather is represented at a borough level rather than at the individual taxi pickup location.
+	- Retrieves hourly weather data covering the pipeline's calculated trip-data date window, including an additional month after the latest trip month to account for trailing drop-offs. Weather is represented at a geographic-region level rather than at the individual taxi pickup location.
 
 1. **Silver Transformations (`02_Silver`)**:
 	- Materializes hardcoded dimension tables (Weather Codes, Borough IDs, Payment Types, Vendor IDs, Rate Codes).
@@ -192,14 +191,44 @@ The pipeline is orchestrated via sequential PySpark notebooks across the Medalli
         
 **Databricks Jobs:** The notebooks are configured as a sequential Databricks workflow in the workspace; the Job configuration is not exported to this repository.
 
+## Pipeline Orchestration
 
-_Databricks automated workflow execution orchestrating the Bronze, Silver, and Gold tasks._
+The notebooks are configured as sequential tasks in a Databricks Job in the workspace.
 ![Databricks workflow](docs/images/databricks_job_pipeline.png)
+
+The workflow follows this dependency order:
+
+```
+Bronze Ingestion
+      │
+      ▼
+Silver Dimensions
+      │
+      ▼
+Silver Transformations
+      │
+      ▼
+Data Quality Validation
+      │
+      ▼
+Gold Layer Build
+      │
+      ▼
+Power BI
+```
+
+The Bronze tasks prepare the rolling TLC data, geographic coordinates, taxi-zone reference data, and hourly weather data. Silver transformations then create the cleaned datasets and quarantine invalid trip records.
+
+The Data Quality Validation task executes the configured SQL checks and raises a `RuntimeError` when a check returns invalid records. A failed DQ task therefore prevents the downstream Gold task from completing in the sequential workflow.
+
+The Databricks Job configuration is maintained in the Databricks workspace and is not exported to this repository.
+
+
 
 
 ## Data Transformation Details
 
-The pipeline handles Several key transformations to ensure data integrity:
+The pipeline applies several key transformations to prepare the Silver and Gold datasets:
 
 - **Weather Transformation:** Casts weather `timestamps` to `timestamp_ntz` and shifts precipitation and snowfall values to the subsequent hourly record within each region using a window function.
 
@@ -246,7 +275,7 @@ Geographic breakdown of total volume and average fare amounts originating from e
 
 ## Data Quality / Validation
 
-The pipeline implements an validation framework in `03_run_dqcs.ipynb` that acts as a circuit breaker before Gold materialization. Validation checks include:
+The pipeline implements a validation framework in `03_run_dqcs.ipynb` that acts as a circuit breaker before Gold materialization. Validation checks include:
 
 - **Null Checks:** Validates absence of nulls in `VendorID`, `RatecodeID`, `payment_type`, and geographic `LocationID`s.
     
@@ -254,7 +283,7 @@ The pipeline implements an validation framework in `03_run_dqcs.ipynb` that acts
     
 - **Logical Consistency:** Flags rows where `tpep_dropoff_datetime` < `tpep_pickup_datetime`.
     
-- **Duplicate Checks:** Aggregates and verifies uniqueness for location IDs and hourly borough weather records.
+- **Duplicate Checks:** Validates uniqueness of taxi-zone reference records and hourly weather records.
 
 ## Technologies Used
 
@@ -266,6 +295,65 @@ The pipeline implements an validation framework in `03_run_dqcs.ipynb` that acts
 | Visualization    | Microsoft Power BI                                           |
 | Architecture     | Medallion (Bronze/Silver/Gold), One Big Table (OBT)          |
 | Platform         | Databricks                                                   |
+
+
+## Setup / Execution
+
+The pipeline is designed to run in a Databricks environment and uses a Unity Catalog Volume for source-file storage.
+
+### Prerequisites
+
+* Databricks workspace with permission to run Python/PySpark notebooks and access Unity Catalog Volumes.
+* Outbound internet access for the NYC TLC download and Open-Meteo APIs.
+* Microsoft Power BI Desktop for the optional BI layer.
+
+### Initial Setup
+
+1. Import the notebooks from this repository into the Databricks workspace.
+
+2. Create or configure the dataset Volume expected by the notebooks:
+
+   `/Volumes/workspace/taxi_weather/datasets/`
+
+3. Copy the initial TLC and taxi-zone files from `intial_datasets/` into the Volume.
+
+4. Ensure the `workspace.taxi_weather` catalog/schema is available for the Delta tables created by the pipeline.
+
+### Execution Order
+
+Run the notebooks in dependency order:
+
+```text
+01_Bronze/
+├── 00_ingest_new_month.ipynb
+├── 01_ingest_borough_coords.ipynb
+├── 02_ingest_trips_zones.ipynb
+└── 03_ingest_weather_api.ipynb
+
+02_Silver/
+├── 01_create_silver_dims.ipynb
+├── 02_transform_silver.ipynb
+└── 03_run_dqcs.ipynb
+
+03_Gold/
+└── 01_build_gold_layer.ipynb
+```
+
+The first Bronze notebook determines whether a new TLC month is available and updates the rolling source-data window. The remaining Bronze notebooks prepare the coordinate, trip, zone, and weather inputs required by the Silver layer.
+
+The Silver notebooks create reference dimensions, transform the source data, quarantine invalid trip records, and run the automated DQ checks.
+
+The Gold notebook runs only after the Silver transformations and DQ validation have completed successfully.
+
+### Power BI
+
+The denormalized Gold table is the primary BI-facing dataset:
+
+`workspace.taxi_weather.gold_obt_trips`
+
+Power BI can use this table as the reporting source for the dashboards included in the project.
+
+
 ## Repository Structure
 ```
 taxi_weather_pipeline/

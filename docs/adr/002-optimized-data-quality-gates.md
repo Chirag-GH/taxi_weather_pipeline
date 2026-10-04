@@ -1,14 +1,31 @@
-# ADR 2: Data Quality Gates via Anti-Joins and Broadcasts
+# ADR 2: Data Quality Gates and Reference Join Optimization
 
 ## Status: Accepted
 
 ## Context
-Before Silver data is promoted to the Gold layer, referential integrity must be enforced. Every `VendorID`, `RatecodeID`, and `LocationID` in the fact table must exist in the respective Silver dimension tables. Performing standard full joins for these checks triggers extensive data shuffles across the cluster, leading to high latency and memory overhead on unpartitioned fact tables.
+
+The pipeline validates Silver datasets before Gold materialization. Several checks verify that configured reference fields, such as `VendorID`, `RatecodeID`, payment types, location IDs, and weather codes, map to the corresponding reference data.
+
+For these validation queries, the required result is the set of records with no corresponding reference value. `LEFT ANTI JOIN` is therefore used for referential-integrity checks.
+
+Separately, the Silver and Gold transformations join large trip datasets with small reference and dimension tables. These smaller tables are suitable candidates for broadcast joins.
 
 ## Decision
-The pipeline implements data quality checks using `LEFT ANTI JOIN` operations combined with PySpark `broadcast()` hints on all dimensional data.
+
+The implementation uses two separate techniques:
+
+1. **Data quality validation:** `LEFT ANTI JOIN` is used in the SQL-based DQ checks to identify records whose configured reference values do not have a corresponding entry in the reference tables.
+
+2. **Transformation join optimization:** Small reference and dimension tables are explicitly broadcast during selected Silver and Gold transformations using PySpark's `broadcast()` function.
+
+The broadcast optimization is therefore part of the transformation logic, not the DQ SQL checks themselves.
 
 ## Consequences
-* **Positive:** The Catalyst Optimizer natively evaluates `LEFT ANTI JOIN` efficiently for identifying missing references, stopping evaluation upon finding a non-match.
-* **Positive:** Broadcasting serializes dimension tables to worker memory, keeping the fact table stationary and preventing cross-cluster shuffles.
-* **Negative:** Broadcasting dictates that right-side tables must remain small to avoid driver node memory exhaustion. This constraint is acceptable in this architecture because the dimension tables (e.g., TLC zones, weather codes) represent fixed data with no growth risk.
+
+* **Positive:** Anti-joins directly identify unmatched records without producing a full joined result for referential-integrity checks.
+
+* **Positive:** Broadcasting sufficiently small reference tables can reduce unnecessary shuffling when they are joined with larger trip datasets.
+
+* **Negative:** Broadcast joins depend on the referenced tables remaining small enough to distribute safely. If their size or usage changes significantly, the join strategy should be reconsidered.
+
+* **Negative:** The DQ framework validates and rejects invalid data; it does not automatically repair the underlying records.

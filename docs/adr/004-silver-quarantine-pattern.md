@@ -3,12 +3,27 @@
 ## Status: Accepted
 
 ## Context
-During Silver layer transformations, records occasionally contain logical impossibilities, such as negative fares, missing primary keys, or drop-off times preceding pick-up times. Dropping these records implicitly removes invalid data but destroys the audit trail, making it difficult to distinguish between upstream data delivery issues and actual invalid metrics generated at the source.
+
+During Silver transformations, taxi records may violate business rules such as non-positive fares, non-positive trip distances, negative `extra` values, invalid pickup/drop-off ordering, or pickup timestamps outside the active pipeline window.
+
+Simply removing these records would make it difficult to determine why they were excluded from the valid Silver dataset.
 
 ## Decision
-The implementation uses an explicit quarantine pattern. The pipeline evaluates business rules sequentially using PySpark's `when().otherwise()` to tag records with a specific `rejection_reason`. Valid records route to `silver_trips`, while invalid records route to `silver_quarantine_trips`.
+
+The implementation uses an explicit quarantine pattern.
+
+Business rules are evaluated sequentially using PySpark's `when().otherwise()` logic to assign a `rejection_reason`. Records with no rejection reason are written to `silver_trips`, while records that fail a business rule are written to `silver_quarantine_trips`.
+
+The quarantine dataset therefore retains the rejected record together with the reason it was excluded from the valid dataset for the processed window.
 
 ## Consequences
-* **Positive:** Preserves a strict, queryable audit trail in the Silver layer, enabling tracing of data loss back to specific business rule violations.
-* **Positive:** Replaces implicit `AND` logic in chained filters with an explicit `OR` routing mechanism, ensuring records failing any single check are appropriately segregated.
-* **Negative:** PySpark's `when().otherwise()` evaluates sequentially (top-to-bottom). If a record violates multiple rules (e.g., both an invalid date and a negative fare), it is only tagged with the first matched rule, masking secondary failures for that specific row.
+
+* **Positive:** Invalid records are explicitly isolated instead of being silently discarded during transformation.
+
+* **Positive:** Rejection reasons make it possible to inspect which business rule caused a record to be excluded.
+
+* **Positive:** The approach provides a queryable record of rejected data for the current processed window.
+
+* **Negative:** The `when().otherwise()` conditions are evaluated sequentially. If a record violates multiple rules, only the first matching rejection reason is retained.
+
+* **Negative:** The quarantine table is overwritten with the active batch, so it should not be treated as a permanent historical audit log across pipeline runs.

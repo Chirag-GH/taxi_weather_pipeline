@@ -1,14 +1,27 @@
-# ADR 1: Stateless Ingestion and Rolling Window Management
+# ADR 1: Filesystem-Driven Rolling Window Ingestion
 
 ## Status: Accepted
 
 ## Context
-The pipeline maintains a 3-month rolling window of NYC TLC trip data. This retention period bounds the dataset size (approximately 10+ million records) to operate efficiently within constrained compute environments. The system requires a mechanism to calculate the next target month for ingestion and identify the oldest month for eviction. Standard patterns often rely on external state tracking, which introduces split-brain risks if the physical file system and the state tracker fall out of sync.
+
+The pipeline maintains a three-month working window of NYC TLC Yellow Taxi trip data to bound compute and storage requirements.
+
+The ingestion process needs to determine which month is currently available, which month should be downloaded next, and which month should be removed from the working window. Maintaining this state separately from the files themselves would introduce another source of truth that could become inconsistent with the actual data stored in the Databricks Volume.
 
 ## Decision
-The implementation uses stateless file-system polling as the single source of truth. Python's `glob` scans the physical `/Volumes/workspace/taxi_weather/datasets/` path at runtime to parse existing `.parquet` files, determines the temporal boundaries of the current data, and calculates the next required month for ingestion.
+
+The implementation uses the files in `/Volumes/workspace/taxi_weather/datasets/` as the source of ingestion state.
+
+Python's `glob` scans the Volume for files matching the expected TLC naming convention (`yellow_tripdata_YYYY-MM.parquet`). The pipeline uses the discovered months to determine the current temporal range, calculates the next target month, downloads it when available, and removes the oldest month to maintain the intended rolling window.
+
+No separate state database or external ingestion-state tracker is used.
 
 ## Consequences
-* **Positive:** The ingestion operation remains idempotent based on actual file presence rather than an external record, allowing the system to naturally recover from interrupted downloads or manual file deletions.
-* **Positive:** Reduces architectural complexity by removing the requirement for a persistent state database or configuration file.
-* **Negative:** Couples the ingestion logic tightly to the upstream provider's file naming convention (`yellow_tripdata_{yyyy}-{mm}.parquet`). Upstream changes to this format will break the polling mechanism.
+
+* **Positive:** Ingestion decisions are derived from the actual files present in storage rather than a separate state store.
+
+* **Positive:** The approach keeps the ingestion mechanism simple and makes the current working window directly observable from the Volume contents.
+
+* **Negative:** The implementation depends on the upstream TLC file naming convention (`yellow_tripdata_{yyyy}-{mm}.parquet`). Changes to that convention would require changes to the polling logic.
+
+* **Negative:** File presence is used to determine the available months; the polling mechanism does not replace separate validation of file contents or completeness.

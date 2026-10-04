@@ -227,11 +227,11 @@ High-level executive summary displaying total trips, revenue metrics, and baseli
 Assessing trip volume fluctuations and demand shifts during varied precipitation, snowfall, and temperature conditions.
 ![Ride Count by Weather and Borough](docs/images/Ride_Count_by_Weather_and_Borough.png)
 
-Analyzing geographic profitability, isolating which inter-borough routes generate the highest revenue per mile.
-![Revenue Per Mile by Route](docs/images/Revenue_Per_Mile_by_Route.png)
+Analyzing geographic profitability, isolating which inter-borough routes generate top 15 highest revenue per mile.
+![Revenue Per Mile by Route](docs/images/Top_15_Revenue_Per_Mile_by_Route.png)
 
 Exploring how factors like trip distance, weather conditions, and payment types influence average tipping percentages.
-![Driver Tipping & Friction](docs/images/Driver_Tipping&Friction.png)
+![Driver Tipping & Friction](docs/images/Driver_Tipping_&_Friction.png)
 
 Geographic breakdown of total volume and average fare amounts originating from each NYC borough.
 ![Ride Count and Average Fares by Borough](docs/images/Ride_Count_and_Average_Fares_by_Borough.png)

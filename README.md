@@ -172,6 +172,8 @@ The pipeline is orchestrated via sequential PySpark notebooks across the Medalli
         
 
 _Databricks automated workflow execution orchestrating the Bronze, Silver, and Gold tasks._
+
+
 ## Data Transformation Details
 
 The pipeline handles Several key transformations to ensure data integrity:
@@ -192,6 +194,7 @@ The Gold layer datasets connect to Microsoft Power BI to explore relationships b
 ### Dashboards & Key Visuals
 
 _High-level executive summary displaying total trips, revenue metrics, and baseline operational health._
+![Executive Overview](docs/images/Executive Overview.png)
 
 _Assessing trip volume fluctuations and demand shifts during varied precipitation, snowfall, and temperature conditions._
 

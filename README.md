@@ -19,13 +19,21 @@ The pipeline processes data from raw sources to business-ready tables using a la
 
 ```mermaid
 graph TD
-    subgraph Data Sources
+    subgraph External Source 1
         TLC[NYC TLC Trip Data Parquet]
-        OM[Open-Meteo Historical API]
         GEO[Open-Meteo Geocoding API]
-        ZCSV[Taxi Zone Lookup CSV]
+        STATIC[Taxi Zone Lookup CSV]
+    end
+
+    subgraph Databricks Volume Storage
+        PARQ[yellow_tripdata_YYYY-MM.parquet * 3]
         JSON_COORD[borough_coords.json]
-        
+        ZCSV[taxi_zone_lookup.csv]
+        JSON_DATES[pipeline_dates.json]
+    end
+
+    subgraph External Source 2
+        OM[Open-Meteo Historical API]
     end
 
     subgraph Bronze Layer
@@ -35,11 +43,16 @@ graph TD
     end
 
     subgraph Silver Layer
+        D{Business Rules & Data Quality}
         ST[silver_trips]
         SQ[silver_quarantine_trips]
         SW[silver_weather]
         SZ[silver_zone]
-        SDIMS[(Silver Dimensions: vendor, rate, payment, borough, wc)]
+        SDIMWC[silver_wc_dim]
+        SDIMB[silver_borough_dim]
+        SDIMP[silver_payment_dim]
+        SDIMV[silver_vendor_dim]
+        SDIMR[silver_rate_dim]
     end
 
     subgraph Gold Layer
@@ -50,87 +63,44 @@ graph TD
     subgraph BI
         PBI[Microsoft Power BI]
     end
-    GEO --> JSON_COORD
-    JSON_COORD --> OM
-    TLC --> BT
-    OM --> BW
+
+    %% Ingestion Flow
+    TLC -->|Chunked Download| PARQ
+    GEO -->|REST GET| JSON_COORD
+    STATIC --> ZCSV
+    PARQ -->|Required Dates| JSON_DATES
+
+    %% Bronze Flow
+    PARQ --> BT
+    JSON_COORD -->|Coordinates| OM
+    JSON_DATES --> OM
+    OM -->|REST GET| BW
     ZCSV --> BZ
 
-    BT --> ST
-    BT --> SQ
+    %% Silver Flow
+    BT --> D
+    D -->|Valid Trip| ST
+    D -->|Invalid Date / Fare| SQ
+    
     BW --> SW
+    SDIMB --> SW
+    SDIMWC --> SW
     BZ --> SZ
-    BZ --> SDIMS
+    SDIMB --> SZ
 
+    %% Gold Flow
     ST --> GF
     SW --> GF
     SZ --> GF
-    SDIMS --> SZ
-    SDIMS --> GF
 
     GF --> GOBT
-    SDIMS --> GOBT
-    SZ --> GOBT
+    SDIMB --> GOBT
+    SDIMV --> GOBT
+    SDIMR --> GOBT
+    SDIMP --> GOBT
+    SDIMWC --> GOBT
 
     GOBT --> PBI
-
-```
- 
-### Medallion Data Flow
-
-```mermaid
-flowchart TD
-  A["Stateless Polling,  Determine Date Window"] --> B["Raw Parquet/JSON in Volume"]
-  B --> C["Bronze: Stores source-derived data"]
-  
-  C --> D{"Business Rules & Data Quality"}
-  D -->|"Invalid Date / Negative Fare"| Q1["Quarantine: silver_quarantine_trips"]
-  D -->|"Valid Trip Record"| E["Silver: silver_trips"]
-  
-  C --> BZ["bronze_zone"]
-  C --> BW["bronze_weather"]
-  
-  DimBorough["silver_borough_dim"] --> SZ["silver_zone"]
-  DimBorough --> SW["silver_weather"]
-  DimWC["silver_wc_dim"] --> SW
-  
-  BZ --> SZ
-  BW --> SW
-  
-  E --> G["Gold Facts"]
-  SW --> G
-  SZ --> G
-  G --> H["Gold OBT (One Big Table)"]
-  H --> BI["BI and Dashboards"]
-```
-
-### Data Ingestion Workflow
-
-```mermaid
-flowchart TD
-  subgraph External Sources
-      API1[Open-Meteo Geocoding API]
-      API2[Open-Meteo Historical API]
-      TLC[NYC TLC Trip Data]
-      STATIC[Taxi Zone CSV]
-  end
-  
-  subgraph Databricks Volume Storage
-      JSON[borough_coord.json]
-      PARQ[yellow_tripdata_YYYY-MM.parquet]
-      ZCSV[taxi_zone_lookup.csv]
-  end
-  
-  API1 -->|REST GET| JSON
-  TLC -->|Chunked Download| PARQ
-  STATIC --> ZCSV
-  
-  API2 -->|REST GET| BW[bronze_weather Delta]
-  PARQ --> BT[bronze_trips Delta]
-  ZCSV --> BZ[bronze_zone Delta]
-
-
-
 ```
 
 ## Data Sources

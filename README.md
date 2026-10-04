@@ -16,6 +16,8 @@ This pipeline implements several data engineering patterns to ensure reliability
 The pipeline processes data from raw sources to business-ready tables using a layered Databricks Medallion architecture. 
 ### Platform Architecture
 
+
+
 ```mermaid
 graph TD
     subgraph Data Sources
@@ -138,7 +140,23 @@ The project integrates three primary data domains:
 | ---------------------------------- | -------------- | ------------------- | -------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
 | **NYC TLC Yellow Taxi Trip Datas** | NYC TLC        | `.parquet` (Volume) | `tpep_pickup_datetime`, `PULocationID`, `DOLocationID`, `fare_amount`, `trip_distance` | Core fact data representing individual taxi rides.                                       |
 | **NYC TLC Taxi Zone Lookup**       | NYC TLC        | `.csv` (Volume)     | `LocationID`, `Borough`, `Zone`, `service_zone`                                        | Spatial lookup to map Location IDs to Boroughs and Zones.                                |
+| **Borough Coordinates**             | Open-Meteo Geocoding API | .json (Volume)         | `latitude`, `longitude`| Provides precise geographic coordinates for the 6 NYC administrative regions to feed the Historical Weather API. |
 | **Historical Weather**             | Open-Meteo API | JSON / REST         | `temperature_2m`, `precipitation`, `snowfall`, `weather_code`                          | Hourly weather for five NYC boroughs plus EWR, represented by one coordinate per region. |
+
+## Dataset Grain
+
+Understanding the granularity of the tables is critical for downstream BI joining and metric aggregation:
+
+
+| Dataset | Grain |
+| :--- | :--- |
+| **silver_trips** | One valid TLC taxi trip. |
+| **silver_weather** | One NYC borough per hour. |
+| **silver_zone** | One NYC TLC Taxi Zone (LocationID). |
+| **gold_facts** | One valid taxi trip enriched with pickup-borough hourly weather. |
+| **gold_obt_trips** | One fully denormalized valid taxi trip. |
+
+
 
 ## Data Pipeline Steps
 
@@ -187,6 +205,15 @@ The pipeline handles Several key transformations to ensure data integrity:
 - **Business Rule Quarantining:** Explicitly tags records where drop-off precedes pick-up, trip distances are `<= 0`, fares are `<= 0`, or pickup dates outside the active pipeline window.
     
 
+## Pipeline Limitations & Design Choices
+
+The following design decisions constraint the scope and operation of the pipeline:
+- **Batch Overwrite Pattern:** Bronze trips, Bronze weather, Silver tables, Quarantine, and Gold tables are strictly written using overwrite mode. While file ingestion represents net-new monthly data, downstream tables are rebuilt entirely for the active window. This is a batch-oriented pipeline, not a streaming or incrementally updated architecture.
+- **3-Month Rolling Window:** The project enforces a 3-month rolling batch window to bound compute and storage footprints.
+- **Spatial Granularity:** Weather is represented using exactly one coordinate pair per NYC borough (5 total regions).
+- **Temporal Granularity:** Weather conditions are joined at the pickup_borough_id and truncated pickup_datehour level. There is no exact coordinate-level or minute-level weather matching due to disparities in the source datasets.
+
+
 ## Taxi + Weather Analysis & Insights
 
 The Gold layer datasets connect to Microsoft Power BI to explore relationships between weather events, geographic locations, and taxi demand.
@@ -231,15 +258,14 @@ The pipeline implements an validation framework in `03_run_dqcs.ipynb` that acts
 | Architecture     | Medallion (Bronze/Silver/Gold), One Big Table (OBT)          |
 | Platform         | Databricks                                                   |
 ## Repository Structure
-
+```
 taxi_weather_pipeline/
-├── .gitignore
+├── .gitignore  
 ├── 01_Bronze/
 │   ├── 00_ingest_new_month.ipynb
 │   ├── 01_ingest_borough_coords.ipynb
 │   ├── 02_ingest_trips_zones.ipynb
 │   └── 03_ingest_weather_api.ipynb
-│
 ├── 02_Silver/
 │   ├── 01_create_silver_dims.ipynb
 │   ├── 02_transform_silver.ipynb
@@ -247,24 +273,29 @@ taxi_weather_pipeline/
 │   ├── 03a_dqc_trips.dbquery.ipynb
 │   ├── 03b_dqc_weather.dbquery.ipynb
 │   └── 03c_dqc_zone.dbquery.ipynb
-│
 ├── 03_Gold/
 │   └── 01_build_gold_layer.ipynb
-│
 ├── docs/
 │   ├── adr/
 │   │   ├── 001-stateless-ingestion.md
 │   │   ├── 002-optimized-data-quality-gates.md
 │   │   ├── 003-dual-gold-layer-modeling.md
 │   │   └── 004-silver-quarantine-pattern.md
-│   └── analytics/
-│       └── BI images
-│
-└── intial_datasets/
-    ├── taxi_zone_lookup.csv
-    ├── yellow_tripdata_2026-05.parquet
-    ├── yellow_tripdata_2026-06.parquet
-    └── yellow_tripdata_2026-07.parquet
-
-
-
+│   └── images/
+│       ├── Average_Tip_%_by_Distance_and_Surcharge_Category.png
+│       ├── Average_Tip%_by_Precipitation_and_Temperature.png
+│       ├── Driver_Tipping&Friction.png
+│       ├── Executive_Overview.png
+│       ├── Revenue_Per_Mile_by_Route.png
+│       ├── Ride_%_by_Hour_and_Rate_Type..png
+│       ├── Ride_Count_and_Average_Fares_by_Borough.png
+│       ├── Ride_Count_by_Weather_and_Borough.png
+│       ├── The_Weather_Impact.png
+│       └── Tips_vs_Distance.png
+├── intial_datasets/
+│   ├── taxi_zone_lookup.csv
+│   ├── yellow_tripdata_2026-05.parquet
+│   ├── yellow_tripdata_2026-06.parquet
+│   └── yellow_tripdata_2026-07.parquet
+└── README.md
+```
